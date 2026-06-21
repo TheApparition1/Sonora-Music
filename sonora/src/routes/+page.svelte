@@ -11,6 +11,7 @@
   let duration = $state(0);
   let volume = $state(1.0);
   let volumeSliderVisible = $state(false);
+  let progressInterval: number | null = null;
 
   async function selectFolder() {
     try {
@@ -32,8 +33,9 @@
       try {
         await invoke("play_music", { filePath: fullPath, index: currentTrackIndex });
         isPlaying = true;
-        // Start progress updates
-        const interval = setInterval(updateProgress, 1000);
+        // Clear existing interval and start new progress updates
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(updateProgress, 1000);
       } catch (error) {
         console.error("Failed to play music:", error);
       }
@@ -60,6 +62,9 @@
         const fullPath = `${selectedFolder}/${nextTrack}`;
         await invoke("play_music", { filePath: fullPath, index: result });
         isPlaying = true;
+        // Clear existing interval and start new progress updates
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(updateProgress, 1000);
       }
     }
   }
@@ -74,6 +79,9 @@
         const fullPath = `${selectedFolder}/${prevTrack}`;
         await invoke("play_music", { filePath: fullPath, index: result });
         isPlaying = true;
+        // Clear existing interval and start new progress updates
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(updateProgress, 1000);
       }
     }
   }
@@ -467,16 +475,15 @@
   }
 
   .volume-slider-vertical {
-    width: 4px;
-    height: 100px;
+    width: 100px;
+    height: 4px;
     -webkit-appearance: none;
     appearance: none;
     background: #2a2a2a;
     border-radius: 2px;
     outline: none;
     cursor: pointer;
-    writing-mode: bt-lr;
-    -webkit-appearance: slider-vertical;
+    transform: rotate(-90deg);
     accent-color: #ffffff;
   }
 

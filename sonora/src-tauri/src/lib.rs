@@ -63,29 +63,30 @@ fn play_music(file_path: String, index: usize, state: tauri::State<SharedAudioSt
     unsafe {
         // Stop current player if exists
         {
-            let mut audio_state = state.lock().unwrap();
+            let audio_state = state.lock().unwrap();
             if let Some(audio_player) = &audio_state.player {
                 let _: () = msg_send![audio_player.player, stop];
             }
         }
-        
+
         let ns_string: id = NSString::alloc(nil).init_str(&file_path);
         let url: id = msg_send![class!(NSURL), fileURLWithPath:ns_string];
 
         let av_player_class = class!(AVAudioPlayer);
         let player: id = msg_send![av_player_class, alloc];
-        let player: id = msg_send![player, initWithContentsOfURL:url error:nil];
+        let mut error: id = nil;
+        let player: id = msg_send![player, initWithContentsOfURL:url error:&mut error];
 
         if player != nil {
             let _: () = msg_send![player, play];
-            
+
             let mut audio_state = state.lock().unwrap();
             audio_state.player = Some(AudioPlayer { player });
             audio_state.current_index = Some(index);
-            
+
             Ok(format!("Playing: {}", file_path))
         } else {
-            Err("Failed to create audio player".to_string())
+            Err(format!("Failed to create audio player for: {}", file_path))
         }
     }
 }
@@ -120,6 +121,9 @@ fn resume_music(state: tauri::State<SharedAudioState>) -> Result<String, String>
 fn skip_next(music_files: Vec<String>, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
     let mut audio_state = state.lock().unwrap();
     if let Some(current_index) = audio_state.current_index {
+        if music_files.is_empty() {
+            return Err("No music files available".to_string());
+        }
         let next_index = if current_index + 1 < music_files.len() {
             current_index + 1
         } else {
@@ -136,6 +140,9 @@ fn skip_next(music_files: Vec<String>, state: tauri::State<SharedAudioState>) ->
 fn skip_previous(music_files: Vec<String>, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
     let mut audio_state = state.lock().unwrap();
     if let Some(current_index) = audio_state.current_index {
+        if music_files.is_empty() {
+            return Err("No music files available".to_string());
+        }
         let prev_index = if current_index > 0 {
             current_index - 1
         } else {
