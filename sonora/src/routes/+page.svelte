@@ -1,10 +1,116 @@
 <script lang="ts">
-  import { Folder, Play, SkipBack, SkipForward } from 'lucide-svelte';
+  import { Folder, Play, SkipBack, SkipForward, Music, Pause } from 'lucide-svelte';
+  import { invoke } from "@tauri-apps/api/core";
   
   let selectedFolder = $state("");
+  let musicFiles = $state<string[]>([]);
+  let selectedTrack = $state<string | null>(null);
+  let isPlaying = $state(false);
+  let currentTrackIndex = $state(-1);
+  let currentTime = $state(0);
+  let duration = $state(0);
 
-  function selectFolder() {
-    console.log("Folder Selection Button Clicked");
+  async function selectFolder() {
+    try {
+      const folderPath = await invoke<string>("select_folder");
+      selectedFolder = folderPath;
+      
+      const files = await invoke<string[]>("get_music_files", { folderPath });
+      musicFiles = files;
+    } catch (error) {
+      console.error("Folder selection failed:", error);
+    }
+  }
+
+  async function selectTrack(file: string) {
+    selectedTrack = file;
+    currentTrackIndex = musicFiles.indexOf(file);
+    if (selectedFolder) {
+      const fullPath = `${selectedFolder}/${file}`;
+      try {
+        await invoke("play_music", { filePath: fullPath, index: currentTrackIndex });
+        isPlaying = true;
+        // Start progress updates
+        const interval = setInterval(updateProgress, 1000);
+      } catch (error) {
+        console.error("Failed to play music:", error);
+      }
+    }
+  }
+
+  async function togglePlayPause() {
+    if (isPlaying) {
+      await invoke("pause_music");
+      isPlaying = false;
+    } else {
+      await invoke("resume_music");
+      isPlaying = true;
+    }
+  }
+
+  async function skipNext() {
+    const result = await invoke<number>("skip_next", { musicFiles });
+    if (typeof result === "number") {
+      currentTrackIndex = result;
+      const nextTrack = musicFiles[result];
+      selectedTrack = nextTrack;
+      if (selectedFolder) {
+        const fullPath = `${selectedFolder}/${nextTrack}`;
+        await invoke("play_music", { filePath: fullPath, index: result });
+        isPlaying = true;
+      }
+    }
+  }
+
+  async function skipPrevious() {
+    const result = await invoke<number>("skip_previous", { musicFiles });
+    if (typeof result === "number") {
+      currentTrackIndex = result;
+      const prevTrack = musicFiles[result];
+      selectedTrack = prevTrack;
+      if (selectedFolder) {
+        const fullPath = `${selectedFolder}/${prevTrack}`;
+        await invoke("play_music", { filePath: fullPath, index: result });
+        isPlaying = true;
+      }
+    }
+  }
+
+  async function updateProgress() {
+    if (isPlaying) {
+      try {
+        const time = await invoke<number>("get_current_time");
+        const dur = await invoke<number>("get_duration");
+        currentTime = time;
+        duration = dur;
+      } catch (error) {
+        console.error("Failed to get progress:", error);
+      }
+    }
+  }
+
+  async function seekToTime(time: number) {
+    try {
+      await invoke("seek_to_time", { time });
+      currentTime = time;
+    } catch (error) {
+      console.error("Failed to seek:", error);
+    }
+  }
+
+  function formatTime(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  function seekToProgress(e: MouseEvent) {
+    const progressBar = e.currentTarget as HTMLElement;
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const percentage = clickX / rect.width;
+    const newTime = percentage * duration;
+    seekToTime(newTime);
   }
 </script>
 
@@ -25,23 +131,48 @@
     </div>
 
     <div class="library-placeholder">
-      <p class="placeholder-text">No music loaded yet</p>
+      {#if musicFiles.length > 0}
+        <div class="music-list">
+          {#each musicFiles as file}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="music-item" class:selected={selectedTrack === file} on:click={() => selectTrack(file)}>
+              <Music size={16} />
+              <span>{file}</span>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <p class="placeholder-text">No music loaded yet</p>
+      {/if}
     </div>
   </div>
 
   <div class="player">
     <div class="track-info">
-      <span class="track-name">No track playing</span>
+      <span class="track-name">{selectedTrack || "No track playing"}</span>
+    </div>
+
+    <div class="progress-container">
+      <span class="time-display">{formatTime(currentTime)}</span>
+      <div class="progress-bar" on:click={seekToProgress}>
+        <div class="progress-fill" style="width: {duration > 0 ? (currentTime / duration) * 100 : 0}%"></div>
+      </div>
+      <span class="time-display">{formatTime(duration - currentTime)}</span>
     </div>
 
     <div class="controls">
-      <button class="control-btn" disabled>
+      <button class="control-btn" on:click={skipPrevious} disabled={currentTrackIndex === -1}>
         <SkipBack size={20} />
       </button>
-      <button class="control-btn play-btn" disabled>
-        <Play size={24} />
+      <button class="control-btn play-btn" on:click={togglePlayPause} disabled={currentTrackIndex === -1}>
+        {#if isPlaying}
+          <Pause size={24} />
+        {:else}
+          <Play size={24} />
+        {/if}
       </button>
-      <button class="control-btn" disabled>
+      <button class="control-btn" on:click={skipNext} disabled={currentTrackIndex === -1}>
         <SkipForward size={20} />
       </button>
     </div>
@@ -53,6 +184,7 @@
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: #191724;
   }
 
   .app {
@@ -133,10 +265,80 @@
     font-size: 1rem;
   }
 
+  .music-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .music-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: #26233a;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #e0def4;
+    font-size: 0.9rem;
+    transition: background-color 0.15s ease, border-color 0.3s ease-out, box-shadow 0.3s ease-out;
+    cursor: pointer;
+  }
+
+  .music-item:hover {
+    background: #26233a;
+  }
+
+  .music-item:active {
+    background: #26233a;
+  }
+
+  .music-item.selected {
+    background: #26233a;
+    border: 1px solid #c4a7e7;
+    box-shadow: 0 0 4px rgba(196, 167, 231, 0.3);
+  }
+
   .player {
     padding: 1.25rem 2rem;
     background: #1f1d2e;
     border-top: 1px solid #26233a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .progress-container {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+    max-width: 600px;
+    margin-bottom: 1rem;
+  }
+
+  .progress-bar {
+    flex: 1;
+    height: 4px;
+    background: #26233a;
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: #c4a7e7;
+    border-radius: 2px;
+    transition: width 0.1s ease;
+  }
+
+  .time-display {
+    font-size: 0.75rem;
+    color: #988ba2;
+    min-width: 40px;
+    text-align: center;
   }
 
   .track-info {

@@ -17,16 +17,10 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
+    hmr: false, // Disable HMR to prevent random reloads
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` and `.svelte-kit`
+      ignored: ["**/src-tauri/**", "**/.svelte-kit/**"],
     },
   },
 }));
