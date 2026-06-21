@@ -187,6 +187,19 @@ fn seek_to_time(time: f64, state: tauri::State<SharedAudioState>) -> Result<Stri
     }
 }
 
+#[tauri::command]
+fn set_volume(volume: f64, state: tauri::State<SharedAudioState>) -> Result<String, String> {
+    unsafe {
+        let audio_state = state.lock().unwrap();
+        if let Some(audio_player) = &audio_state.player {
+            let _: () = msg_send![audio_player.player, setVolume:volume];
+            Ok(format!("Volume set to {}", volume))
+        } else {
+            Err("No audio playing".to_string())
+        }
+    }
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -208,7 +221,8 @@ pub fn run() {
             skip_previous,
             get_current_time,
             get_duration,
-            seek_to_time
+            seek_to_time,
+            set_volume
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

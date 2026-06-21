@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Folder, Play, SkipBack, SkipForward, Music, Pause } from 'lucide-svelte';
+  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Volume2, VolumeX } from 'lucide-svelte';
   import { invoke } from "@tauri-apps/api/core";
   
   let selectedFolder = $state("");
@@ -9,6 +9,8 @@
   let currentTrackIndex = $state(-1);
   let currentTime = $state(0);
   let duration = $state(0);
+  let volume = $state(1.0);
+  let volumeSliderVisible = $state(false);
 
   async function selectFolder() {
     try {
@@ -98,6 +100,19 @@
     }
   }
 
+  async function setVolume(vol: number) {
+    try {
+      await invoke("set_volume", { volume: vol });
+      volume = vol;
+    } catch (error) {
+      console.error("Failed to set volume:", error);
+    }
+  }
+
+  function toggleVolumeSlider() {
+    volumeSliderVisible = !volumeSliderVisible;
+  }
+
   function formatTime(seconds: number): string {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -175,6 +190,29 @@
       <button class="control-btn" on:click={skipNext} disabled={currentTrackIndex === -1}>
         <SkipForward size={20} />
       </button>
+    </div>
+
+    <div class="volume-wrapper">
+      <div class="volume-icon" on:click={toggleVolumeSlider}>
+        {#if volume > 0}
+          <Volume2 size={20} />
+        {:else}
+          <VolumeX size={20} />
+        {/if}
+      </div>
+      {#if volumeSliderVisible}
+        <div class="volume-slider-container">
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={volume}
+            on:input={(e) => setVolume(parseFloat(e.target.value))}
+            class="volume-slider-vertical"
+          />
+        </div>
+      {/if}
     </div>
   </div>
 </div>
@@ -307,6 +345,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    position: relative;
   }
 
   .progress-container {
@@ -383,5 +422,103 @@
 
   .play-btn {
     padding: 0.625rem 1.25rem;
+  }
+
+  .volume-wrapper {
+    display: flex;
+    align-items: center;
+    position: absolute;
+    right: 1.5rem;
+    bottom: 1.25rem;
+  }
+
+  .volume-icon {
+    padding: 0.5rem;
+    cursor: pointer;
+    color: #ffffff;
+    transition: color 0.15s ease;
+  }
+
+  .volume-icon:hover {
+    color: #cccccc;
+  }
+
+  .volume-slider-container {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    margin-bottom: 0.5rem;
+    padding: 0.75rem 0.625rem;
+    background: #1a1a1a;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    animation: flyOut 0.2s ease-out;
+  }
+
+  @keyframes flyOut {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .volume-slider-vertical {
+    width: 4px;
+    height: 100px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #2a2a2a;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    writing-mode: bt-lr;
+    -webkit-appearance: slider-vertical;
+    accent-color: #ffffff;
+  }
+
+  .volume-slider-vertical::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    transition: transform 0.15s ease;
+  }
+
+  .volume-slider-vertical::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+
+  .volume-slider-vertical::-webkit-slider-runnable-track {
+    background: #2a2a2a;
+    border-radius: 2px;
+  }
+
+  .volume-slider-vertical::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    transition: transform 0.15s ease;
+  }
+
+  .volume-slider-vertical::-moz-range-thumb:hover {
+    transform: scale(1.15);
+  }
+
+  .volume-slider-vertical::-moz-range-track {
+    background: #2a2a2a;
+    border-radius: 2px;
   }
 </style>
