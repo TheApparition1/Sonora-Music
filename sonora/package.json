@@ -25,7 +25,7 @@
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.0.0",
     "autoprefixer": "^10.5.0",
-    "postcss": "^8.5.15",
+    "postcss": "^8.5.16",
     "svelte": "^5.56.4",
     "svelte-check": "^4.7.1",
     "tailwindcss": "^4.3.1",
