@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Shuffle } from 'lucide-svelte';
+  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Volume2, VolumeX, Shuffle } from 'lucide-svelte';
   import { invoke } from "@tauri-apps/api/core";
   
   let selectedFolder = $state("");
