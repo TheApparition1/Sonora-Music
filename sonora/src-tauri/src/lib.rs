@@ -15,6 +15,9 @@ unsafe impl Sync for AudioPlayer {}
 struct AudioState {
     player: Option<AudioPlayer>,
     current_index: Option<usize>,
+    shuffle: bool,
+    shuffled_indices: Vec<usize>,
+    volume: f64,
 }
 
 type SharedAudioState = Mutex<AudioState>;
@@ -78,6 +81,12 @@ fn play_music(file_path: String, index: usize, state: tauri::State<SharedAudioSt
         let player: id = msg_send![player, initWithContentsOfURL:url error:&mut error];
 
         if player != nil {
+            // Apply saved volume
+            {
+                let audio_state = state.lock().unwrap();
+                let _: () = msg_send![player, setVolume:audio_state.volume];
+            }
+            
             let _: () = msg_send![player, play];
 
             let mut audio_state = state.lock().unwrap();
@@ -124,10 +133,31 @@ fn skip_next(music_files: Vec<String>, state: tauri::State<SharedAudioState>) ->
         if music_files.is_empty() {
             return Err("No music files available".to_string());
         }
-        let next_index = if current_index + 1 < music_files.len() {
-            current_index + 1
+        
+        let next_index = if audio_state.shuffle {
+            // Use shuffled order
+            if audio_state.shuffled_indices.is_empty() {
+                // Generate shuffled indices
+                let mut indices: Vec<usize> = (0..music_files.len()).collect();
+                use rand::seq::SliceRandom;
+                indices.shuffle(&mut rand::thread_rng());
+                audio_state.shuffled_indices = indices;
+            }
+            
+            let current_shuffled_pos = audio_state.shuffled_indices.iter().position(|&i| i == current_index).unwrap_or(0);
+            let next_shuffled_pos = if current_shuffled_pos + 1 < audio_state.shuffled_indices.len() {
+                current_shuffled_pos + 1
+            } else {
+                0 // Loop back to start
+            };
+            audio_state.shuffled_indices[next_shuffled_pos]
         } else {
-            0 // Loop back to start
+            // Sequential order
+            if current_index + 1 < music_files.len() {
+                current_index + 1
+            } else {
+                0 // Loop back to start
+            }
         };
         audio_state.current_index = Some(next_index);
         Ok(next_index)
@@ -143,10 +173,31 @@ fn skip_previous(music_files: Vec<String>, state: tauri::State<SharedAudioState>
         if music_files.is_empty() {
             return Err("No music files available".to_string());
         }
-        let prev_index = if current_index > 0 {
-            current_index - 1
+        
+        let prev_index = if audio_state.shuffle {
+            // Use shuffled order
+            if audio_state.shuffled_indices.is_empty() {
+                // Generate shuffled indices
+                let mut indices: Vec<usize> = (0..music_files.len()).collect();
+                use rand::seq::SliceRandom;
+                indices.shuffle(&mut rand::thread_rng());
+                audio_state.shuffled_indices = indices;
+            }
+            
+            let current_shuffled_pos = audio_state.shuffled_indices.iter().position(|&i| i == current_index).unwrap_or(0);
+            let prev_shuffled_pos = if current_shuffled_pos > 0 {
+                current_shuffled_pos - 1
+            } else {
+                audio_state.shuffled_indices.len() - 1 // Loop to end
+            };
+            audio_state.shuffled_indices[prev_shuffled_pos]
         } else {
-            music_files.len() - 1 // Loop to end
+            // Sequential order
+            if current_index > 0 {
+                current_index - 1
+            } else {
+                music_files.len() - 1 // Loop to end
+            }
         };
         audio_state.current_index = Some(prev_index);
         Ok(prev_index)
@@ -197,14 +248,30 @@ fn seek_to_time(time: f64, state: tauri::State<SharedAudioState>) -> Result<Stri
 #[tauri::command]
 fn set_volume(volume: f64, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        let audio_state = state.lock().unwrap();
+        let mut audio_state = state.lock().unwrap();
+        // Clamp volume between 0.0 and 1.0
+        let clamped_volume = volume.max(0.0).min(1.0);
+        audio_state.volume = clamped_volume;
+        
         if let Some(audio_player) = &audio_state.player {
-            let _: () = msg_send![audio_player.player, setVolume:volume];
-            Ok(format!("Volume set to {}", volume))
-        } else {
-            Err("No audio playing".to_string())
+            let _: () = msg_send![audio_player.player, setVolume:clamped_volume];
         }
+        
+        Ok(format!("Volume set to {}", clamped_volume))
     }
+}
+
+#[tauri::command]
+fn toggle_shuffle(state: tauri::State<SharedAudioState>) -> Result<bool, String> {
+    let mut audio_state = state.lock().unwrap();
+    audio_state.shuffle = !audio_state.shuffle;
+    
+    // Reset shuffled indices when toggling
+    if audio_state.shuffle {
+        audio_state.shuffled_indices.clear();
+    }
+    
+    Ok(audio_state.shuffle)
 }
 
 
@@ -213,6 +280,9 @@ pub fn run() {
     let audio_state = SharedAudioState::new(AudioState {
         player: None,
         current_index: None,
+        shuffle: false,
+        shuffled_indices: Vec::new(),
+        volume: 0.5,
     });
     
     tauri::Builder::default()
@@ -229,7 +299,8 @@ pub fn run() {
             get_current_time,
             get_duration,
             seek_to_time,
-            set_volume
+            set_volume,
+            toggle_shuffle
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
