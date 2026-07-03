@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Folder, Play, SkipBack, SkipForward, Music, Pause } from 'lucide-svelte';
+  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Shuffle } from 'lucide-svelte';
   import { invoke } from "@tauri-apps/api/core";
   
   let selectedFolder = $state("");
@@ -9,6 +9,8 @@
   let currentTrackIndex = $state(-1);
   let currentTime = $state(0);
   let duration = $state(0);
+  let progressInterval: number | null = null;
+  let shuffleEnabled = $state(false);
 
   async function selectFolder() {
     try {
@@ -30,8 +32,9 @@
       try {
         await invoke("play_music", { filePath: fullPath, index: currentTrackIndex });
         isPlaying = true;
-        // Start progress updates
-        const interval = setInterval(updateProgress, 1000);
+        // Clear existing interval and start new progress updates
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(updateProgress, 1000);
       } catch (error) {
         console.error("Failed to play music:", error);
       }
@@ -58,6 +61,9 @@
         const fullPath = `${selectedFolder}/${nextTrack}`;
         await invoke("play_music", { filePath: fullPath, index: result });
         isPlaying = true;
+        // Clear existing interval and start new progress updates
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(updateProgress, 1000);
       }
     }
   }
@@ -72,6 +78,9 @@
         const fullPath = `${selectedFolder}/${prevTrack}`;
         await invoke("play_music", { filePath: fullPath, index: result });
         isPlaying = true;
+        // Clear existing interval and start new progress updates
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(updateProgress, 1000);
       }
     }
   }
@@ -95,6 +104,16 @@
       currentTime = time;
     } catch (error) {
       console.error("Failed to seek:", error);
+    }
+  }
+
+
+  async function toggleShuffle() {
+    try {
+      const result = await invoke<boolean>("toggle_shuffle");
+      shuffleEnabled = result;
+    } catch (error) {
+      console.error("Failed to toggle shuffle:", error);
     }
   }
 
@@ -175,7 +194,11 @@
       <button class="control-btn" on:click={skipNext} disabled={currentTrackIndex === -1}>
         <SkipForward size={20} />
       </button>
+      <button class="control-btn" class:shuffle-active={shuffleEnabled} on:click={toggleShuffle} disabled={currentTrackIndex === -1}>
+        <Shuffle size={20} />
+      </button>
     </div>
+
   </div>
 </div>
 
@@ -307,6 +330,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    position: relative;
   }
 
   .progress-container {
@@ -355,6 +379,7 @@
     display: flex;
     gap: 0.75rem;
     align-items: center;
+    justify-content: center;
   }
 
   .control-btn {
@@ -370,6 +395,11 @@
     justify-content: center;
   }
 
+  .shuffle-active {
+    background: #c4a7e7;
+    border-color: #c4a7e7;
+    color: #191724;
+  }
   .control-btn:hover:not(:disabled) {
     background: #31748f;
     border-color: #9ccfd8;
@@ -384,4 +414,5 @@
   .play-btn {
     padding: 0.625rem 1.25rem;
   }
+
 </style>
