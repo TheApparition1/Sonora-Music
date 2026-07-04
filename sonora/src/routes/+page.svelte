@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Folder, Play, SkipBack, SkipForward, Music, Pause } from 'lucide-svelte';
+  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Repeat, Shuffle, Repeat1} from 'lucide-svelte';
   import { invoke } from "@tauri-apps/api/core";
   
   let selectedFolder = $state("");
@@ -9,6 +9,11 @@
   let currentTrackIndex = $state(-1);
   let currentTime = $state(0);
   let duration = $state(0);
+  let repeatMode = $state<'off' | 'all' | 'one'>('off');
+  let shuffleMode = $state(false);
+  let shuffedPlaylist = $state<string[]>([]);
+  let originalPlaylist = $state<string[]>([]);
+
 
   async function selectFolder() {
     try {
