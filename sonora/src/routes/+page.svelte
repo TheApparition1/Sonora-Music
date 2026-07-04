@@ -11,7 +11,7 @@
   let duration = $state(0);
   let repeatMode = $state<'off' | 'all' | 'one'>('off');
   let shuffleMode = $state(false);
-  let shuffedPlaylist = $state<string[]>([]);
+  let shuffledPlaylist = $state<string[]>([]);
   let originalPlaylist = $state<string[]>([]);
 
 
@@ -29,11 +29,12 @@
 
   async function selectTrack(file: string) {
     selectedTrack = file;
-    currentTrackIndex = musicFiles.indexOf(file);
+    const playlist = shuffleMode ? shuffledPlaylist : musicFiles;
+    currentTrackIndex = playlist.indexOf(file);
     if (selectedFolder) {
       const fullPath = `${selectedFolder}/${file}`;
       try {
-        await invoke("play_music", { filePath: fullPath, index: currentTrackIndex });
+        await invoke("play_music", { filePath: fullPath, index: currentTrackIndex, repeatMode, shuffleMode });
         isPlaying = true;
         // Start progress updates
         const interval = setInterval(updateProgress, 1000);
@@ -54,28 +55,30 @@
   }
 
   async function skipNext() {
-    const result = await invoke<number>("skip_next", { musicFiles });
+    const playlist = shuffleMode ? shuffledPlaylist : musicFiles;
+    const result = await invoke<number>("skip_next", { musicFiles: playlist, currentIndex: currentTrackIndex, repeatMode, shuffleMode });
     if (typeof result === "number") {
       currentTrackIndex = result;
-      const nextTrack = musicFiles[result];
+      const nextTrack = playlist[result];
       selectedTrack = nextTrack;
       if (selectedFolder) {
         const fullPath = `${selectedFolder}/${nextTrack}`;
-        await invoke("play_music", { filePath: fullPath, index: result });
+        await invoke("play_music", { filePath: fullPath, index: result, repeatMode, shuffleMode });
         isPlaying = true;
       }
     }
   }
 
   async function skipPrevious() {
-    const result = await invoke<number>("skip_previous", { musicFiles });
+    const playlist = shuffleMode ? shuffledPlaylist : musicFiles;
+    const result = await invoke<number>("skip_previous", { musicFiles: playlist, currentIndex: currentTrackIndex, repeatMode, shuffleMode });
     if (typeof result === "number") {
       currentTrackIndex = result;
-      const prevTrack = musicFiles[result];
+      const prevTrack = playlist[result];
       selectedTrack = prevTrack;
       if (selectedFolder) {
         const fullPath = `${selectedFolder}/${prevTrack}`;
-        await invoke("play_music", { filePath: fullPath, index: result });
+        await invoke("play_music", { filePath: fullPath, index: result, repeatMode, shuffleMode });
         isPlaying = true;
       }
     }
@@ -88,6 +91,11 @@
         const dur = await invoke<number>("get_duration");
         currentTime = time;
         duration = dur;
+        
+        // Auto-advance to next track when song ends (unless repeat one)
+        if (dur > 0 && time >= dur - 0.1 && repeatMode !== 'one') {
+          await skipNext();
+        }
       } catch (error) {
         console.error("Failed to get progress:", error);
       }
@@ -100,6 +108,32 @@
       currentTime = time;
     } catch (error) {
       console.error("Failed to seek:", error);
+    }
+  }
+
+  async function toggleRepeat() {
+    if (repeatMode === 'off') {
+      repeatMode = 'all';
+    } else if (repeatMode === 'all') {
+      repeatMode = 'one';
+    } else {
+      repeatMode = 'off';
+    }
+    await invoke("set_repeat_mode", { repeatMode });
+  }
+
+  function toggleShuffle() {
+    shuffleMode = !shuffleMode;
+    if (shuffleMode) {
+      originalPlaylist = [...musicFiles];
+      shuffledPlaylist = [...musicFiles].sort(() => Math.random() - 0.5);
+      const currentTrack = musicFiles[currentTrackIndex];
+      const newIndex = shuffledPlaylist.indexOf(currentTrack);
+      if (newIndex !== -1) {
+        [shuffledPlaylist[0], shuffledPlaylist[newIndex]] = [shuffledPlaylist[newIndex], shuffledPlaylist[0]];
+      }
+    } else {
+      shuffledPlaylist = [];
     }
   }
 
@@ -167,24 +201,41 @@
     </div>
 
     <div class="controls">
-      <button class="control-btn" on:click={skipPrevious} disabled={currentTrackIndex === -1}>
-        <SkipBack size={20} />
+      <button class="control-btn" on:click={toggleShuffle} class:active={shuffleMode} disabled={currentTrackIndex === -1}>
+        <Shuffle size={20} />
       </button>
-      <button class="control-btn play-btn" on:click={togglePlayPause} disabled={currentTrackIndex === -1}>
-        {#if isPlaying}
-          <Pause size={24} />
+      <div class="main-controls">
+        <button class="control-btn" on:click={skipPrevious} disabled={currentTrackIndex === -1}>
+          <SkipBack size={20} />
+        </button>
+        <button class="control-btn play-btn" on:click={togglePlayPause} disabled={currentTrackIndex === -1}>
+          {#if isPlaying}
+            <Pause size={24} />
+          {:else}
+            <Play size={24} />
+          {/if}
+        </button>
+        <button class="control-btn" on:click={skipNext} disabled={currentTrackIndex === -1}>
+          <SkipForward size={20} />
+        </button>
+      </div>
+      <button class="control-btn" on:click={toggleRepeat} class:active={repeatMode !== 'off'} disabled={currentTrackIndex === -1}>
+        {#if repeatMode === 'one'}
+          <Repeat1 size={20} />
         {:else}
-          <Play size={24} />
+          <Repeat size={20} />
         {/if}
-      </button>
-      <button class="control-btn" on:click={skipNext} disabled={currentTrackIndex === -1}>
-        <SkipForward size={20} />
       </button>
     </div>
   </div>
 </div>
 
 <style>
+  :global(html) {
+    margin: 0;
+    padding: 0;
+  }
+
   :global(body) {
     margin: 0;
     padding: 0;
@@ -194,6 +245,7 @@
 
   .app {
     height: 100vh;
+    width: 100%;
     display: flex;
     flex-direction: column;
     background: #191724;
@@ -358,6 +410,13 @@
 
   .controls {
     display: flex;
+    gap: 2rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .main-controls {
+    display: flex;
     gap: 0.75rem;
     align-items: center;
   }
@@ -388,5 +447,11 @@
 
   .play-btn {
     padding: 0.625rem 1.25rem;
+  }
+
+  .control-btn.active {
+    background: #c4a7e7;
+    border-color: #c4a7e7;
+    color: #191724;
   }
 </style>

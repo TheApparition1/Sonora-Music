@@ -15,6 +15,8 @@ unsafe impl Sync for AudioPlayer {}
 struct AudioState {
     player: Option<AudioPlayer>,
     current_index: Option<usize>,
+    repeat_mode: String,
+    shuffle_mode: bool,
 }
 
 type SharedAudioState = Mutex<AudioState>;
@@ -59,7 +61,7 @@ fn get_music_files(folder_path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn play_music(file_path: String, index: usize, state: tauri::State<SharedAudioState>) -> Result<String, String> {
+fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
         // Stop current player if exists
         {
@@ -77,11 +79,20 @@ fn play_music(file_path: String, index: usize, state: tauri::State<SharedAudioSt
         let player: id = msg_send![player, initWithContentsOfURL:url error:nil];
 
         if player != nil {
+            // Set numberOfLoops to -1 for infinite loop when repeat mode is "one"
+            if repeat_mode == "one" {
+                let _: () = msg_send![player, setNumberOfLoops:-1];
+            } else {
+                let _: () = msg_send![player, setNumberOfLoops:0];
+            }
+            
             let _: () = msg_send![player, play];
             
             let mut audio_state = state.lock().unwrap();
             audio_state.player = Some(AudioPlayer { player });
             audio_state.current_index = Some(index);
+            audio_state.repeat_mode = repeat_mode;
+            audio_state.shuffle_mode = shuffle_mode;
             
             Ok(format!("Playing: {}", file_path))
         } else {
@@ -117,35 +128,68 @@ fn resume_music(state: tauri::State<SharedAudioState>) -> Result<String, String>
 }
 
 #[tauri::command]
-fn skip_next(music_files: Vec<String>, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
-    let mut audio_state = state.lock().unwrap();
-    if let Some(current_index) = audio_state.current_index {
-        let next_index = if current_index + 1 < music_files.len() {
-            current_index + 1
+fn set_repeat_mode(repeat_mode: String, state: tauri::State<SharedAudioState>) -> Result<String, String> {
+    unsafe {
+        let mut audio_state = state.lock().unwrap();
+        audio_state.repeat_mode = repeat_mode.clone();
+        
+        if let Some(audio_player) = &audio_state.player {
+            if repeat_mode == "one" {
+                let _: () = msg_send![audio_player.player, setNumberOfLoops:-1];
+            } else {
+                let _: () = msg_send![audio_player.player, setNumberOfLoops:0];
+            }
+            Ok(format!("Repeat mode set to {}", repeat_mode))
         } else {
-            0 // Loop back to start
-        };
-        audio_state.current_index = Some(next_index);
-        Ok(next_index)
-    } else {
-        Err("No track currently playing".to_string())
+            Ok("Repeat mode saved".to_string())
+        }
     }
 }
 
 #[tauri::command]
-fn skip_previous(music_files: Vec<String>, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
+fn skip_next(music_files: Vec<String>, current_index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
     let mut audio_state = state.lock().unwrap();
-    if let Some(current_index) = audio_state.current_index {
-        let prev_index = if current_index > 0 {
-            current_index - 1
-        } else {
-            music_files.len() - 1 // Loop to end
-        };
-        audio_state.current_index = Some(prev_index);
-        Ok(prev_index)
-    } else {
-        Err("No track currently playing".to_string())
+    audio_state.repeat_mode = repeat_mode.clone();
+    audio_state.shuffle_mode = shuffle_mode;
+    
+    if repeat_mode == "one" {
+        return Ok(current_index);
     }
+    
+    let next_index = if current_index + 1 < music_files.len() {
+        current_index + 1
+    } else {
+        if repeat_mode == "all" {
+            0
+        } else {
+            return Err("End of playlist".to_string());
+        }
+    };
+    audio_state.current_index = Some(next_index);
+    Ok(next_index)
+}
+
+#[tauri::command]
+fn skip_previous(music_files: Vec<String>, current_index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
+    let mut audio_state = state.lock().unwrap();
+    audio_state.repeat_mode = repeat_mode.clone();
+    audio_state.shuffle_mode = shuffle_mode;
+    
+    if repeat_mode == "one" {
+        return Ok(current_index);
+    }
+    
+    let prev_index = if current_index > 0 {
+        current_index - 1
+    } else {
+        if repeat_mode == "all" {
+            music_files.len() - 1
+        } else {
+            return Err("Start of playlist".to_string());
+        }
+    };
+    audio_state.current_index = Some(prev_index);
+    Ok(prev_index)
 }
 
 #[tauri::command]
@@ -193,6 +237,8 @@ pub fn run() {
     let audio_state = SharedAudioState::new(AudioState {
         player: None,
         current_index: None,
+        repeat_mode: "off".to_string(),
+        shuffle_mode: false,
     });
     
     tauri::Builder::default()
@@ -204,6 +250,7 @@ pub fn run() {
             play_music,
             pause_music,
             resume_music,
+            set_repeat_mode,
             skip_next,
             skip_previous,
             get_current_time,
