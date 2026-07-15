@@ -1,12 +1,22 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
-use cocoa::base::{id, nil};
-use cocoa::foundation::NSString;
+use cocoa::base::id;
+use cocoa::base::nil;
+use cocoa::foundation::{NSString};
+
 use objc::{class, msg_send, sel, sel_impl};
 
 // Wrapper to make Objective-C objects Send/Sync
 struct AudioPlayer {
     player: id,
+}
+
+impl Drop for AudioPlayer {
+    fn drop(&mut self) {
+        unsafe {
+            let _: () = msg_send![self.player, release];
+        }
+    }
 }
 
 unsafe impl Send for AudioPlayer {}
@@ -63,9 +73,9 @@ fn get_music_files(folder_path: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        // Stop current player if exists
+        // Stop current player if exists (Drop will handle release)
         {
-            let mut audio_state = state.lock().unwrap();
+            let audio_state = state.lock().expect("Audio state lock poisoned");
             if let Some(audio_player) = &audio_state.player {
                 let _: () = msg_send![audio_player.player, stop];
             }
@@ -73,10 +83,12 @@ fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode
         
         let ns_string: id = NSString::alloc(nil).init_str(&file_path);
         let url: id = msg_send![class!(NSURL), fileURLWithPath:ns_string];
+        let _: () = msg_send![ns_string, release];
 
         let av_player_class = class!(AVAudioPlayer);
         let player: id = msg_send![av_player_class, alloc];
         let player: id = msg_send![player, initWithContentsOfURL:url error:nil];
+        let _: () = msg_send![url, release];
 
         if player != nil {
             // Set numberOfLoops to -1 for infinite loop when repeat mode is "one"
@@ -88,7 +100,7 @@ fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode
             
             let _: () = msg_send![player, play];
             
-            let mut audio_state = state.lock().unwrap();
+            let mut audio_state = state.lock().expect("Audio state lock poisoned");
             audio_state.player = Some(AudioPlayer { player });
             audio_state.current_index = Some(index);
             audio_state.repeat_mode = repeat_mode;
@@ -104,7 +116,7 @@ fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode
 #[tauri::command]
 fn pause_music(state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        let audio_state = state.lock().unwrap();
+        let audio_state = state.lock().expect("Audio state lock poisoned");
         if let Some(audio_player) = &audio_state.player {
             let _: () = msg_send![audio_player.player, pause];
             Ok("Paused".to_string())
@@ -117,7 +129,7 @@ fn pause_music(state: tauri::State<SharedAudioState>) -> Result<String, String> 
 #[tauri::command]
 fn resume_music(state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        let audio_state = state.lock().unwrap();
+        let audio_state = state.lock().expect("Audio state lock poisoned");
         if let Some(audio_player) = &audio_state.player {
             let _: () = msg_send![audio_player.player, play];
             Ok("Resumed".to_string())
@@ -130,7 +142,7 @@ fn resume_music(state: tauri::State<SharedAudioState>) -> Result<String, String>
 #[tauri::command]
 fn set_repeat_mode(repeat_mode: String, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        let mut audio_state = state.lock().unwrap();
+        let mut audio_state = state.lock().expect("Audio state lock poisoned");
         audio_state.repeat_mode = repeat_mode.clone();
         
         if let Some(audio_player) = &audio_state.player {
@@ -148,7 +160,7 @@ fn set_repeat_mode(repeat_mode: String, state: tauri::State<SharedAudioState>) -
 
 #[tauri::command]
 fn skip_next(music_files: Vec<String>, current_index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
-    let mut audio_state = state.lock().unwrap();
+    let mut audio_state = state.lock().expect("Audio state lock poisoned");
     audio_state.repeat_mode = repeat_mode.clone();
     audio_state.shuffle_mode = shuffle_mode;
     
@@ -171,7 +183,7 @@ fn skip_next(music_files: Vec<String>, current_index: usize, repeat_mode: String
 
 #[tauri::command]
 fn skip_previous(music_files: Vec<String>, current_index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<usize, String> {
-    let mut audio_state = state.lock().unwrap();
+    let mut audio_state = state.lock().expect("Audio state lock poisoned");
     audio_state.repeat_mode = repeat_mode.clone();
     audio_state.shuffle_mode = shuffle_mode;
     
@@ -195,7 +207,7 @@ fn skip_previous(music_files: Vec<String>, current_index: usize, repeat_mode: St
 #[tauri::command]
 fn get_current_time(state: tauri::State<SharedAudioState>) -> Result<f64, String> {
     unsafe {
-        let audio_state = state.lock().unwrap();
+        let audio_state = state.lock().expect("Audio state lock poisoned");
         if let Some(audio_player) = &audio_state.player {
             let current_time: f64 = msg_send![audio_player.player, currentTime];
             Ok(current_time)
@@ -208,7 +220,7 @@ fn get_current_time(state: tauri::State<SharedAudioState>) -> Result<f64, String
 #[tauri::command]
 fn get_duration(state: tauri::State<SharedAudioState>) -> Result<f64, String> {
     unsafe {
-        let audio_state = state.lock().unwrap();
+        let audio_state = state.lock().expect("Audio state lock poisoned");
         if let Some(audio_player) = &audio_state.player {
             let duration: f64 = msg_send![audio_player.player, duration];
             Ok(duration)
@@ -221,7 +233,7 @@ fn get_duration(state: tauri::State<SharedAudioState>) -> Result<f64, String> {
 #[tauri::command]
 fn seek_to_time(time: f64, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        let audio_state = state.lock().unwrap();
+        let audio_state = state.lock().expect("Audio state lock poisoned");
         if let Some(audio_player) = &audio_state.player {
             let _: () = msg_send![audio_player.player, setCurrentTime:time];
             Ok(format!("Seeked to {}", time))
