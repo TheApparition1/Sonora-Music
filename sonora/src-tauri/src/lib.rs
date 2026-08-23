@@ -14,7 +14,11 @@ struct AudioPlayer {
 
 impl Drop for AudioPlayer {
     fn drop(&mut self) {
-        // Don't release here - we handle releases manually to prevent double-free
+        unsafe {
+            if self.player != nil {
+                let _: () = msg_send![self.player, release];
+            }
+        }
     }
 }
 

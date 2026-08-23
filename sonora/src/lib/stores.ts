@@ -30,6 +30,9 @@ export function toggleSidebar() {
   sidebarOpen.update(n => !n);
 }
 
+// View tab state (Library vs Queue)
+export const currentViewTab = writable<'library' | 'queue'>('library');
+
 // Player state
 export const selectedFolder = writable<string>("");
 export const musicFiles = writable<string[]>([]);

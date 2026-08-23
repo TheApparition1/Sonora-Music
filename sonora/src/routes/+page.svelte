@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Repeat, Shuffle, Repeat1, Menu} from 'lucide-svelte';
+  import { Folder, Play, SkipBack, SkipForward, Music, Pause, Repeat, Shuffle, Repeat1, Menu, ListMusic} from 'lucide-svelte';
   import { invoke } from "@tauri-apps/api/core";
-  import { toggleSidebar, selectedFolder, musicFiles, selectedTrack, isPlaying, currentTrackIndex, currentTime, duration, repeatMode, shuffleMode, shuffledPlaylist, originalPlaylist } from '$lib/stores';
+  import { toggleSidebar, selectedFolder, musicFiles, selectedTrack, isPlaying, currentTrackIndex, currentTime, duration, repeatMode, shuffleMode, shuffledPlaylist, originalPlaylist, currentViewTab } from '$lib/stores';
   import { onMount, onDestroy } from 'svelte';
 
   let progressInterval: number | null = null;
@@ -21,8 +21,18 @@
 
   async function selectTrack(file: string) {
     selectedTrack.set(file);
-    const playlist = $shuffleMode ? $shuffledPlaylist : $musicFiles;
-    currentTrackIndex.set(playlist.indexOf(file));
+    
+    if ($shuffleMode) {
+      // Initialize shuffled playlist if empty
+      if ($shuffledPlaylist.length === 0) {
+        const shuffled = [...$musicFiles].sort(() => Math.random() - 0.5);
+        shuffledPlaylist.set(shuffled);
+      }
+      currentTrackIndex.set($shuffledPlaylist.indexOf(file));
+    } else {
+      currentTrackIndex.set($musicFiles.indexOf(file));
+    }
+    
     if ($selectedFolder) {
       const fullPath = `${$selectedFolder}/${file}`;
       try {
@@ -51,6 +61,46 @@
 
   async function skipNext() {
     const playlist = $shuffleMode ? $shuffledPlaylist : $musicFiles;
+    
+    // Ensure playlist is not empty
+    if (playlist.length === 0) {
+      isPlaying.set(false);
+      return;
+    }
+    
+    // Check if we're at the end of the playlist
+    if ($currentTrackIndex >= playlist.length - 1) {
+      if ($shuffleMode) {
+        // Reshuffle and start from beginning
+        const shuffled = [...$musicFiles].sort(() => Math.random() - 0.5);
+        shuffledPlaylist.set(shuffled);
+        currentTrackIndex.set(0);
+        const nextTrack = shuffled[0];
+        selectedTrack.set(nextTrack);
+        if ($selectedFolder) {
+          const fullPath = `${$selectedFolder}/${nextTrack}`;
+          await invoke("play_music", { filePath: fullPath, index: 0, repeatMode: $repeatMode, shuffleMode: $shuffleMode });
+          isPlaying.set(true);
+        }
+        return;
+      } else if ($repeatMode === 'all') {
+        // Start from beginning
+        currentTrackIndex.set(0);
+        const nextTrack = $musicFiles[0];
+        selectedTrack.set(nextTrack);
+        if ($selectedFolder) {
+          const fullPath = `${$selectedFolder}/${nextTrack}`;
+          await invoke("play_music", { filePath: fullPath, index: 0, repeatMode: $repeatMode, shuffleMode: $shuffleMode });
+          isPlaying.set(true);
+        }
+        return;
+      } else {
+        // Stop playback
+        isPlaying.set(false);
+        return;
+      }
+    }
+    
     const result = await invoke<number>("skip_next", { musicFiles: playlist, currentIndex: $currentTrackIndex, repeatMode: $repeatMode, shuffleMode: $shuffleMode });
     if (typeof result === "number") {
       currentTrackIndex.set(result);
@@ -61,6 +111,9 @@
         await invoke("play_music", { filePath: fullPath, index: result, repeatMode: $repeatMode, shuffleMode: $shuffleMode });
         isPlaying.set(true);
       }
+    } else {
+      // If Rust returns an error, try to handle it
+      isPlaying.set(false);
     }
   }
 
@@ -88,7 +141,8 @@
         duration.set(dur);
         
         // Auto-advance to next track when song ends (unless repeat one)
-        if (dur > 0 && time >= dur - 0.1 && $repeatMode !== 'one') {
+        // Use a more lenient check to ensure we catch the end of the song
+        if (dur > 0 && time >= dur - 1 && $repeatMode !== 'one') {
           await skipNext();
         }
       } catch (error) {
@@ -123,16 +177,28 @@
     const newShuffleMode = !$shuffleMode;
     shuffleMode.set(newShuffleMode);
     if (newShuffleMode) {
+      // Save original order
       originalPlaylist.set([...$musicFiles]);
-      const newShuffled = [...$musicFiles].sort(() => Math.random() - 0.5);
-      const currentTrack = $musicFiles[$currentTrackIndex];
-      const newIndex = newShuffled.indexOf(currentTrack);
-      if (newIndex !== -1) {
-        [newShuffled[0], newShuffled[newIndex]] = [newShuffled[newIndex], newShuffled[0]];
+      // Create shuffled playlist
+      const shuffled = [...$musicFiles].sort(() => Math.random() - 0.5);
+      // Move current track to position 0 if it exists
+      if ($selectedTrack) {
+        const currentIndex = shuffled.indexOf($selectedTrack);
+        if (currentIndex !== -1) {
+          [shuffled[0], shuffled[currentIndex]] = [shuffled[currentIndex], shuffled[0]];
+        }
+        currentTrackIndex.set(0);
+      } else {
+        currentTrackIndex.set(0);
       }
-      shuffledPlaylist.set(newShuffled);
+      shuffledPlaylist.set(shuffled);
     } else {
+      // Clear shuffled playlist
       shuffledPlaylist.set([]);
+      // Reset index to match original playlist
+      if ($selectedTrack) {
+        currentTrackIndex.set($musicFiles.indexOf($selectedTrack));
+      }
     }
   }
 
@@ -140,6 +206,11 @@
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  function removeFileExtension(filename: string): string {
+    const lastDotIndex = filename.lastIndexOf('.');
+    return lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename;
   }
 
   function seekToProgress(e: MouseEvent) {
@@ -177,20 +248,61 @@
       {/if}
     </div>
 
+    <div class="tabs">
+      <button class="tab" class:active={$currentViewTab === 'library'} on:click={() => currentViewTab.set('library')}>
+        <Music size={16} />
+        <span>Library</span>
+      </button>
+      <button class="tab" class:active={$currentViewTab === 'queue'} on:click={() => currentViewTab.set('queue')}>
+        <ListMusic size={16} />
+        <span>Queue</span>
+      </button>
+    </div>
+
     <div class="library-placeholder">
-      {#if $musicFiles.length > 0}
-        <div class="music-list">
-          {#each $musicFiles as file}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="music-item" class:selected={$selectedTrack === file} on:click={() => selectTrack(file)}>
-              <Music size={16} />
-              <span>{file}</span>
-            </div>
-          {/each}
-        </div>
-      {:else}
-        <p class="placeholder-text">No music loaded yet</p>
+      {#if $currentViewTab === 'library'}
+        {#if $musicFiles.length > 0}
+          <div class="music-list">
+            {#each $musicFiles as file}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="music-item" class:selected={$selectedTrack === file} on:click={() => selectTrack(file)}>
+                <Music size={16} />
+                <span>{file}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="placeholder-text">No music loaded yet</p>
+        {/if}
+      {:else if $currentViewTab === 'queue'}
+        {#if $shuffleMode && $shuffledPlaylist.length > 0}
+          <div class="music-list">
+            {#each $shuffledPlaylist as file, index}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="music-item" class:selected={$selectedTrack === file} class:current={index === $currentTrackIndex} on:click={() => selectTrack(file)}>
+                <span class="queue-number">{index + 1}</span>
+                <Music size={16} />
+                <span>{removeFileExtension(file)}</span>
+              </div>
+            {/each}
+          </div>
+        {:else if !$shuffleMode && $musicFiles.length > 0}
+          <div class="music-list">
+            {#each $musicFiles as file, index}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="music-item" class:selected={$selectedTrack === file} class:current={index === $currentTrackIndex} on:click={() => selectTrack(file)}>
+                <span class="queue-number">{index + 1}</span>
+                <Music size={16} />
+                <span>{removeFileExtension(file)}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="placeholder-text">Queue is empty</p>
+        {/if}
       {/if}
     </div>
   </div>
@@ -259,6 +371,7 @@
     flex-direction: column;
     background: var(--background);
     color: var(--text);
+    overflow: hidden;
   }
 
   .header {
@@ -301,12 +414,45 @@
     flex-direction: column;
     padding: 2rem;
     gap: 1.5rem;
+    overflow-y: auto;
   }
 
   .folder-section {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .tab:hover {
+    background: var(--button-hover);
+    color: var(--text);
+  }
+
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--background);
   }
 
   .folder-btn {
@@ -387,6 +533,24 @@
     box-shadow: 0 0 4px rgba(196, 167, 231, 0.3);
   }
 
+  .music-item.current {
+    background: var(--accent);
+    color: var(--background);
+    border-color: var(--accent);
+  }
+
+  .queue-number {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-weight: 600;
+    min-width: 24px;
+    text-align: center;
+  }
+
+  .music-item.current .queue-number {
+    color: var(--background);
+  }
+
   .player {
     padding: 1.25rem 2rem;
     background: var(--header);
@@ -430,12 +594,21 @@
 
   .track-info {
     margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
   }
 
   .track-name {
     font-size: 0.95rem;
     color: var(--text);
     font-weight: 400;
+  }
+
+  .debug-info {
+    font-size: 0.75rem;
+    color: var(--muted);
   }
 
   .controls {
