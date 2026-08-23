@@ -6,7 +6,10 @@ const storedThemeId = typeof window !== 'undefined'
   ? localStorage.getItem('theme') || defaultThemeId 
   : defaultThemeId;
 
-export const currentThemeId = writable<string>(storedThemeId);
+// Validate that stored theme still exists, otherwise use default
+const validThemeId = themes.find(t => t.id === storedThemeId) ? storedThemeId : defaultThemeId;
+
+export const currentThemeId = writable<string>(validThemeId);
 
 export const currentTheme = derived(currentThemeId, ($id) => {
   return themes.find(t => t.id === $id) || themes[0];

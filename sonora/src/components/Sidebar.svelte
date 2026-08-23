@@ -10,8 +10,7 @@
 <div class="sidebar" class:open={$sidebarOpen}>
   <div class="sidebar-header">
     <div class="logo">
-      <Music size={24} />
-      <span>Sonora</span>
+      <span>Sonora Music</span>
     </div>
     <button class="close-btn" onclick={toggleSidebar}>
       <X size={20} />
@@ -53,7 +52,7 @@
     top: 0;
     left: 0;
     bottom: 0;
-    width: 300px;
+    width: 320px;
     background: var(--header);
     border-right: 1px solid var(--border);
     z-index: 999;

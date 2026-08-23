@@ -9,7 +9,6 @@
     <button class="menu-btn" on:click={toggleSidebar}>
       <Menu size={24} />
     </button>
-    <Settings size={24} />
     <h1>Settings</h1>
   </div>
 
@@ -25,12 +24,7 @@
           class:active={$currentThemeId === theme.id}
           on:click={() => setTheme(theme.id)}
         >
-          <div class="theme-preview">
-            <div class="color-swatch" style="background: {theme.colors.background}"></div>
-            <div class="color-swatch" style="background: {theme.colors.header}"></div>
-            <div class="color-swatch" style="background: {theme.colors.accent}"></div>
-            <div class="color-swatch" style="background: {theme.colors.buttonBorder}"></div>
-          </div>
+          <div class="theme-preview"><div class="color-swatch" style="background: {theme.colors.background}"></div><div class="color-swatch" style="background: {theme.colors.header}"></div><div class="color-swatch" style="background: {theme.colors.accent}"></div><div class="color-swatch" style="background: {theme.colors.buttonBorder}"></div></div>
           <span class="theme-name">{theme.name}</span>
           {#if $currentThemeId === theme.id}
             <span class="active-indicator">✓</span>
@@ -127,16 +121,20 @@
   }
 
   .theme-preview {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.25rem;
-    width: 100%;
+    display: table;
+    width: 80px;
+    height: 80px;
+    margin: 0 auto;
+    border-collapse: collapse;
+    table-layout: fixed;
   }
 
   .color-swatch {
-    aspect-ratio: 1;
-    border-radius: 4px;
-    height: 12px;
+    display: table-cell;
+    width: 40px;
+    height: 40px;
+    border-radius: 0;
+    padding: 0;
   }
 
   .theme-name {

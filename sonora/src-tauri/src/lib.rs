@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use cocoa::base::id;
 use cocoa::base::nil;
 use cocoa::foundation::{NSString};
+use cocoa::foundation::NSAutoreleasePool;
 
 use objc::{class, msg_send, sel, sel_impl};
 
@@ -13,9 +14,7 @@ struct AudioPlayer {
 
 impl Drop for AudioPlayer {
     fn drop(&mut self) {
-        unsafe {
-            let _: () = msg_send![self.player, release];
-        }
+        // Don't release here - we handle releases manually to prevent double-free
     }
 }
 
@@ -27,6 +26,7 @@ struct AudioState {
     current_index: Option<usize>,
     repeat_mode: String,
     shuffle_mode: bool,
+    is_replacing: bool,
 }
 
 type SharedAudioState = Mutex<AudioState>;
@@ -73,20 +73,54 @@ fn get_music_files(folder_path: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode: bool, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
-        // Stop current player if exists (Drop will handle release)
-        {
-            let audio_state = state.lock().expect("Audio state lock poisoned");
-            if let Some(audio_player) = &audio_state.player {
+        // Validate file path
+        if file_path.is_empty() {
+            return Err("File path is empty".to_string());
+        }
+        
+        // Take old player out of state and set replacing flag
+        let old_player = {
+            let mut audio_state = state.lock().expect("Audio state lock poisoned");
+            if audio_state.is_replacing {
+                return Err("Player is being replaced".to_string());
+            }
+            audio_state.is_replacing = true;
+            audio_state.player.take()
+        };
+        
+        // Stop old player if exists (Drop will handle cleanup)
+        if let Some(audio_player) = old_player {
+            if audio_player.player != nil {
                 let _: () = msg_send![audio_player.player, stop];
             }
         }
         
+        // Create NSString safely
         let ns_string: id = NSString::alloc(nil).init_str(&file_path);
+        if ns_string == nil {
+            let mut audio_state = state.lock().expect("Audio state lock poisoned");
+            audio_state.is_replacing = false;
+            return Err("Failed to create NSString".to_string());
+        }
+        
         let url: id = msg_send![class!(NSURL), fileURLWithPath:ns_string];
         let _: () = msg_send![ns_string, release];
+        
+        if url == nil {
+            let mut audio_state = state.lock().expect("Audio state lock poisoned");
+            audio_state.is_replacing = false;
+            return Err("Failed to create NSURL".to_string());
+        }
 
         let av_player_class = class!(AVAudioPlayer);
         let player: id = msg_send![av_player_class, alloc];
+        if player == nil {
+            let _: () = msg_send![url, release];
+            let mut audio_state = state.lock().expect("Audio state lock poisoned");
+            audio_state.is_replacing = false;
+            return Err("Failed to allocate AVAudioPlayer".to_string());
+        }
+        
         let player: id = msg_send![player, initWithContentsOfURL:url error:nil];
         let _: () = msg_send![url, release];
 
@@ -105,9 +139,12 @@ fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode
             audio_state.current_index = Some(index);
             audio_state.repeat_mode = repeat_mode;
             audio_state.shuffle_mode = shuffle_mode;
+            audio_state.is_replacing = false;
             
             Ok(format!("Playing: {}", file_path))
         } else {
+            let mut audio_state = state.lock().expect("Audio state lock poisoned");
+            audio_state.is_replacing = false;
             Err("Failed to create audio player".to_string())
         }
     }
@@ -117,9 +154,16 @@ fn play_music(file_path: String, index: usize, repeat_mode: String, shuffle_mode
 fn pause_music(state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
         let audio_state = state.lock().expect("Audio state lock poisoned");
+        if audio_state.is_replacing {
+            return Err("Player is being replaced".to_string());
+        }
         if let Some(audio_player) = &audio_state.player {
-            let _: () = msg_send![audio_player.player, pause];
-            Ok("Paused".to_string())
+            if audio_player.player != nil {
+                let _: () = msg_send![audio_player.player, pause];
+                Ok("Paused".to_string())
+            } else {
+                Err("Player object is invalid".to_string())
+            }
         } else {
             Err("No audio playing".to_string())
         }
@@ -130,9 +174,16 @@ fn pause_music(state: tauri::State<SharedAudioState>) -> Result<String, String> 
 fn resume_music(state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
         let audio_state = state.lock().expect("Audio state lock poisoned");
+        if audio_state.is_replacing {
+            return Err("Player is being replaced".to_string());
+        }
         if let Some(audio_player) = &audio_state.player {
-            let _: () = msg_send![audio_player.player, play];
-            Ok("Resumed".to_string())
+            if audio_player.player != nil {
+                let _: () = msg_send![audio_player.player, play];
+                Ok("Resumed".to_string())
+            } else {
+                Err("Player object is invalid".to_string())
+            }
         } else {
             Err("No audio playing".to_string())
         }
@@ -143,15 +194,22 @@ fn resume_music(state: tauri::State<SharedAudioState>) -> Result<String, String>
 fn set_repeat_mode(repeat_mode: String, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
         let mut audio_state = state.lock().expect("Audio state lock poisoned");
+        if audio_state.is_replacing {
+            return Err("Player is being replaced".to_string());
+        }
         audio_state.repeat_mode = repeat_mode.clone();
         
         if let Some(audio_player) = &audio_state.player {
-            if repeat_mode == "one" {
-                let _: () = msg_send![audio_player.player, setNumberOfLoops:-1];
+            if audio_player.player != nil {
+                if repeat_mode == "one" {
+                    let _: () = msg_send![audio_player.player, setNumberOfLoops:-1];
+                } else {
+                    let _: () = msg_send![audio_player.player, setNumberOfLoops:0];
+                }
+                Ok(format!("Repeat mode set to {}", repeat_mode))
             } else {
-                let _: () = msg_send![audio_player.player, setNumberOfLoops:0];
+                Err("Player object is invalid".to_string())
             }
-            Ok(format!("Repeat mode set to {}", repeat_mode))
         } else {
             Ok("Repeat mode saved".to_string())
         }
@@ -208,9 +266,16 @@ fn skip_previous(music_files: Vec<String>, current_index: usize, repeat_mode: St
 fn get_current_time(state: tauri::State<SharedAudioState>) -> Result<f64, String> {
     unsafe {
         let audio_state = state.lock().expect("Audio state lock poisoned");
+        if audio_state.is_replacing {
+            return Err("Player is being replaced".to_string());
+        }
         if let Some(audio_player) = &audio_state.player {
-            let current_time: f64 = msg_send![audio_player.player, currentTime];
-            Ok(current_time)
+            if audio_player.player != nil {
+                let current_time: f64 = msg_send![audio_player.player, currentTime];
+                Ok(current_time)
+            } else {
+                Err("Player object is invalid".to_string())
+            }
         } else {
             Err("No audio playing".to_string())
         }
@@ -221,9 +286,16 @@ fn get_current_time(state: tauri::State<SharedAudioState>) -> Result<f64, String
 fn get_duration(state: tauri::State<SharedAudioState>) -> Result<f64, String> {
     unsafe {
         let audio_state = state.lock().expect("Audio state lock poisoned");
+        if audio_state.is_replacing {
+            return Err("Player is being replaced".to_string());
+        }
         if let Some(audio_player) = &audio_state.player {
-            let duration: f64 = msg_send![audio_player.player, duration];
-            Ok(duration)
+            if audio_player.player != nil {
+                let duration: f64 = msg_send![audio_player.player, duration];
+                Ok(duration)
+            } else {
+                Err("Player object is invalid".to_string())
+            }
         } else {
             Err("No audio playing".to_string())
         }
@@ -234,9 +306,16 @@ fn get_duration(state: tauri::State<SharedAudioState>) -> Result<f64, String> {
 fn seek_to_time(time: f64, state: tauri::State<SharedAudioState>) -> Result<String, String> {
     unsafe {
         let audio_state = state.lock().expect("Audio state lock poisoned");
+        if audio_state.is_replacing {
+            return Err("Player is being replaced".to_string());
+        }
         if let Some(audio_player) = &audio_state.player {
-            let _: () = msg_send![audio_player.player, setCurrentTime:time];
-            Ok(format!("Seeked to {}", time))
+            if audio_player.player != nil {
+                let _: () = msg_send![audio_player.player, setCurrentTime:time];
+                Ok(format!("Seeked to {}", time))
+            } else {
+                Err("Player object is invalid".to_string())
+            }
         } else {
             Err("No audio playing".to_string())
         }
@@ -251,6 +330,7 @@ pub fn run() {
         current_index: None,
         repeat_mode: "off".to_string(),
         shuffle_mode: false,
+        is_replacing: false,
     });
     
     tauri::Builder::default()
