@@ -16,7 +16,9 @@ impl Drop for AudioPlayer {
     fn drop(&mut self) {
         unsafe {
             if self.player != nil {
-                let _: () = msg_send![self.player, release];
+                let _: () = msg_send![self.player, stop];
+                // Let the system handle cleanup - don't manually release
+                // AVAudioPlayer has complex internal ARC that crashes with manual release
             }
         }
     }
