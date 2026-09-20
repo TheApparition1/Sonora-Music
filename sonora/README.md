@@ -1,6 +1,6 @@
 # Sonora Music
 
-Sonora is a simple macOS native music player, that is made using Tauri, Rust and SvelteKit. It is designed to let you play back local music files with ease.
+Sonora is a simple macOS na/tive music player, that is made using Tauri, Rust and SvelteKit. It is designed to let you play back local music files with ease.
 
 ## Tech Stack
 
