@@ -8,11 +8,12 @@ Sonora is a simple macOS native music player, that is made using Tauri, Rust and
 - **Backend**: Rust with Tauri 2, Apple AVFoundation - Specifically AVAudioPlayer
 - **Icons**: Lucide Svelte
 
+![Sonora Preview.png](Sonora%20Preview.png)
 
 ## Development and Installation
 
 - For end users, you can either download the app from the Sonora website or from the Github releases.
-
+  - I have included 2 audio files in the GitHub Release to test the app.
 - For those who want to develop the app, run the commands below to set up your workspace.
 
 ```bash
@@ -20,6 +21,7 @@ cd sonora
 npm install
 npm run dev
 ```
+
 
 ## FAQ
 - Why use Tauri?
