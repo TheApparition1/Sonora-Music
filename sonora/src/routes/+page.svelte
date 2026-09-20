@@ -96,7 +96,7 @@
         return;
       } else {
         // Stop playback
-        isPlaying.set(false);
+        await invoke("seek_to_time", { time: 0 });
         return;
       }
     }
@@ -113,7 +113,7 @@
       }
     } else {
       // If Rust returns an error, try to handle it
-      isPlaying.set(false);
+      await invoke("seek_to_time", { time: 0 });
     }
   }
 
