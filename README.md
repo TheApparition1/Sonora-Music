@@ -8,6 +8,11 @@ Sonora is a simple macOS native music player, that is made using Tauri, Rust and
 - **Backend**: Rust with Tauri 2, Apple AVFoundation - Specifically AVAudioPlayer
 - **Icons**: Lucide Svelte
 
+## Please note that to run the app, you will need to first open the DMG and drag the app into your applications, as usual, then you will need to open your terminal and run this:
+### xattr -cr "/Applications/Sonora Music.app"
+
+If you do not do this, macOS will say that the app is damaged and you should move it to the bin.
+This is because I do not have an Apple Developer Certificate to sign the app.
 
 ## Development and Installation
 
